@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <title>ClientClock</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header class="top">
+    <span class="mark">ClientClock<span class="caret">_</span></span>
+    <button id="settingsBtn" class="text-btn" aria-expanded="false">Settings</button>
+  </header>
+
+  <section id="settings" class="panel" hidden>
+    <label class="field">
+      <span>Your time zone</span>
+      <input id="mainInput" list="tzList" autocomplete="off" spellcheck="false">
+    </label>
+    <p class="error" id="mainError" hidden>Pick a time zone from the list.</p>
+    <div class="row">
+      <span class="label">Clock</span>
+      <div class="seg" data-key="hour12">
+        <button type="button" data-v="true">12h</button>
+        <button type="button" data-v="false">24h</button>
+      </div>
+    </div>
+    <div class="row">
+      <span class="label">Appearance</span>
+      <div class="seg" data-key="theme">
+        <button type="button" data-v="light">Light</button>
+        <button type="button" data-v="dark">Dark</button>
+        <button type="button" data-v="auto">Auto</button>
+      </div>
+    </div>
+    <p class="hint">Auto turns dark when it's night where you are.</p>
+  </section>
+
+  <section class="hero" id="hero">
+    <div class="orb" aria-hidden="true"></div>
+    <div class="hero-top">
+      <span class="eyebrow">You &middot; <span id="mainCity"></span></span>
+      <span class="chip" id="mainChip"></span>
+    </div>
+    <div class="hero-time"><span id="mainTime"></span><span class="ampm" id="mainAmpm"></span></div>
+    <div class="hero-date" id="mainDate"></div>
+  </section>
+
+  <section class="list" id="list" aria-label="Your time zones"></section>
+  <p class="empty" id="empty">Add the places your clients work from. You'll see their local time, how far ahead or behind they are, and whether it's day or night there.</p>
+
+  <form id="addForm" class="panel add" hidden>
+    <label class="field">
+      <span>Name</span>
+      <input id="nameInput" placeholder="e.g. Sarah, Toronto office" maxlength="40" autocomplete="off">
+    </label>
+    <label class="field">
+      <span>Time zone</span>
+      <input id="tzInput" list="tzList" placeholder="Search a city or region" autocomplete="off" spellcheck="false">
+    </label>
+    <p class="error" id="addError" hidden>Pick a time zone from the list.</p>
+    <div class="add-actions">
+      <button type="button" class="text-btn" id="cancelAdd">Cancel</button>
+      <button type="submit" class="pill"><span>Save</span><i class="pill-arrow" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M6 3.5 10.5 8 6 12.5"/></svg></i></button>
+    </div>
+  </form>
+
+  <footer class="foot" id="foot">
+    <button type="button" class="pill" id="addBtn"><span>Add a time zone</span><i class="pill-arrow" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M6 3.5 10.5 8 6 12.5"/></svg></i></button>
+  </footer>
+
+  <datalist id="tzList"></datalist>
+  <script src="popup.js"></script>
+</body>
+</html>
