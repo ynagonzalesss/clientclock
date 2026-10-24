@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "ClientClock – Time Zone Converter & World Clock for Remote Work",
   "short_name": "ClientClock",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "See your clients' local time, how far ahead or behind they are, and whether it's day or night there. Built for VAs.",
   "action": {
     "default_title": "ClientClock",
