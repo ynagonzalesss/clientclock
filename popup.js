@@ -3,17 +3,24 @@
 /* ---------- storage (chrome.storage.sync, with a localStorage fallback for previewing) ---------- */
 const DEFAULTS = {
   main: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+  mainPlace: "",
   hour12: true,
-  theme: "auto", // light | dark | auto
-  zones: []      // [{ id, name, tz }]
+  theme: "auto",        // light | dark | auto
+  palette: "blush",     // blush | sage | slate | sand | graphite
+  nameFont: "cormorant",// cormorant | playfair | fraunces | dancing | outfit
+  seenVersion: "",
+  zones: []             // [{ id, name, tz, place }]
 };
 const hasChrome = typeof chrome !== "undefined" && chrome.storage && chrome.storage.sync;
+const VERSION = (hasChrome && chrome.runtime && chrome.runtime.getManifest) ? chrome.runtime.getManifest().version : "1.1.0";
+const PALETTES = { blush: "Blush", sage: "Sage", slate: "Slate", sand: "Sand", graphite: "Graphite" };
+const FONTS = { cormorant: "Cormorant", playfair: "Playfair", fraunces: "Fraunces", dancing: "Dancing Script", outfit: "Outfit" };
 
 const store = {
-  get() {
-    if (hasChrome) return new Promise(r => chrome.storage.sync.get(DEFAULTS, r));
-    try { return Promise.resolve({ ...DEFAULTS, ...JSON.parse(localStorage.getItem("clientclock") || "{}") }); }
-    catch { return Promise.resolve({ ...DEFAULTS }); }
+  raw() {
+    if (hasChrome) return new Promise(r => chrome.storage.sync.get(null, r));
+    try { return Promise.resolve(JSON.parse(localStorage.getItem("clientclock") || "{}")); }
+    catch { return Promise.resolve({}); }
   },
   set(state) {
     if (hasChrome) return new Promise(r => chrome.storage.sync.set(state, r));
@@ -23,22 +30,22 @@ const store = {
 };
 
 /* ---------- time helpers ---------- */
-const ALL_ZONES = (() => {
-  try { return Intl.supportedValuesOf("timeZone"); } catch { return ["UTC"]; }
-})();
-const ZONE_SET = new Set([...ALL_ZONES, "UTC"]);
-const partsCache = new Map();
+const fmtCache = new Map();
+function fmt(key, opts) {
+  let f = fmtCache.get(key);
+  if (!f) { f = new Intl.DateTimeFormat("en-US", opts); fmtCache.set(key, f); }
+  return f;
+}
+function validZone(tz) {
+  try { new Intl.DateTimeFormat("en-US", { timeZone: tz }); return true; } catch { return false; }
+}
 
 function zoneParts(tz, date) {
-  let f = partsCache.get(tz);
-  if (!f) {
-    f = new Intl.DateTimeFormat("en-US", {
-      timeZone: tz, hourCycle: "h23",
-      year: "numeric", month: "2-digit", day: "2-digit",
-      hour: "2-digit", minute: "2-digit", second: "2-digit"
-    });
-    partsCache.set(tz, f);
-  }
+  const f = fmt("parts|" + tz, {
+    timeZone: tz, hourCycle: "h23",
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit"
+  });
   const p = {};
   for (const x of f.formatToParts(date)) p[x.type] = x.value;
   return { y: +p.year, mo: +p.month, d: +p.day, h: +p.hour % 24, mi: +p.minute, s: +p.second };
@@ -57,9 +64,7 @@ function isNight(tz, date) {
 }
 
 function formatTime(tz, date, hour12) {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: tz, hour: "numeric", minute: "2-digit", hour12
-  }).formatToParts(date);
+  const parts = fmt(`time|${tz}|${hour12}`, { timeZone: tz, hour: "numeric", minute: "2-digit", hour12 }).formatToParts(date);
   let time = "", period = "";
   for (const x of parts) {
     if (x.type === "dayPeriod") period = x.value;
@@ -69,21 +74,14 @@ function formatTime(tz, date, hour12) {
 }
 
 function formatDate(tz, date) {
-  return new Intl.DateTimeFormat("en-US", {
-    timeZone: tz, weekday: "long", month: "long", day: "numeric"
-  }).format(date);
+  return fmt("date|" + tz, { timeZone: tz, weekday: "long", month: "long", day: "numeric" }).format(date);
 }
 
-function shortZone(tz, date) {
+function zoneName(tz, date, style) {
   try {
-    const p = new Intl.DateTimeFormat("en-US", { timeZone: tz, timeZoneName: "short" }).formatToParts(date);
+    const p = fmt(`zn|${tz}|${style}`, { timeZone: tz, timeZoneName: style }).formatToParts(date);
     return (p.find(x => x.type === "timeZoneName") || {}).value || "";
   } catch { return ""; }
-}
-
-function cityOf(tz) {
-  const last = tz.split("/").pop();
-  return last.replace(/_/g, " ");
 }
 
 function dayIndex(tz, date) {
@@ -101,6 +99,125 @@ function diffLabel(tz, main, date) {
   return { text: amount + (m > 0 ? " ahead" : " behind"), day, ahead: m > 0 };
 }
 
+/* ---------- place search ---------- */
+const norm = s => String(s).normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+const cityOf = tz => tz.split("/").pop().replace(/_/g, " ");
+const modernTz = tz => TZ_LEGACY[tz] || tz;
+const COUNTRY_ZONES = {};
+const PLACE_BY_TZ = {};
+for (const [tz, city, cc, note] of TZ_PLACES) {
+  (COUNTRY_ZONES[cc] = COUNTRY_ZONES[cc] || []).push(tz);
+  PLACE_BY_TZ[tz] = { city, cc, note };
+}
+const countryName = cc => (TZ_COUNTRIES[cc] || [cc])[0];
+
+function placeLabel(tz) {
+  const p = PLACE_BY_TZ[modernTz(tz)];
+  if (!p) return tz === "UTC" ? "UTC" : cityOf(tz);
+  return `${p.city}, ${countryName(p.cc)}`;
+}
+
+let INDEX = null;
+function buildIndex() {
+  // popular zones get a boost; earlier in the list = slightly higher (so a country lists its main zones first)
+  const rank = new Map(TZ_POPULAR.map((tz, i) => [tz, 15 + (TZ_POPULAR.length - i) * 0.02]));
+  const popular = { has: tz => rank.has(tz) };
+  INDEX = [];
+  for (const [tz, city, cc, note] of TZ_PLACES) {
+    const multi = COUNTRY_ZONES[cc].length > 1;
+    INDEX.push({
+      tz, title: `${city}, ${countryName(cc)}`, sub: multi ? note : "", place: `${city}, ${countryName(cc)}`,
+      keys: [norm(city), ...TZ_COUNTRIES[cc].map(norm)], minor: note ? [norm(note)] : [],
+      boost: (rank.get(tz) || 0) - (tz.startsWith("Antarctica/") ? 30 : 0)
+    });
+  }
+  for (const [term, tz, title, sub] of TZ_ALIASES) {
+    const isAbbr = /^[A-Z]{2,5} · /.test(title);
+    INDEX.push({
+      tz, title, sub, keys: [norm(term)], minor: [],
+      place: isAbbr ? title.split(" · ")[1] : title,
+      boost: (popular.has(tz) ? 8 : 0) + (sub === "Capital" ? 5 : 0)
+    });
+  }
+}
+
+function scoreKey(k, q) {
+  if (k === q) return 100;
+  if (k.startsWith(q)) return 80 - Math.min(10, (k.length - q.length) * 0.3);
+  if ((" " + k).includes(" " + q)) return 60;
+  if (q.length >= 3 && k.includes(q)) return 30;
+  return 0;
+}
+
+function search(query) {
+  if (!INDEX) buildIndex();
+  const q = norm(query);
+  if (!q) return [];
+  const scored = [];
+  for (const e of INDEX) {
+    let s = 0;
+    for (const k of e.keys) s = Math.max(s, scoreKey(k, q));
+    for (const k of e.minor) s = Math.max(s, scoreKey(k, q) * 0.6);
+    if (s > 0) scored.push([s + e.boost, e]);
+  }
+  scored.sort((a, b) => b[0] - a[0] || a[1].title.localeCompare(b[1].title));
+  const seen = new Set(), out = [];
+  for (const [, e] of scored) {
+    const key = e.title.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key); out.push(e);
+    if (out.length >= 30) break;
+  }
+  return out;
+}
+
+function attachSearch(input, list, onPick) {
+  let results = [], active = 0;
+  const close = () => { list.hidden = true; input.setAttribute("aria-expanded", "false"); };
+  const render = () => {
+    if (!input.value.trim()) { close(); return; }
+    const now = new Date();
+    list.innerHTML = results.length ? results.map((e, i) => {
+      const off = zoneName(e.tz, now, "shortOffset") || "GMT";
+      const t = formatTime(e.tz, now, state.hour12);
+      const sub = [e.sub, off, `${t.time}${t.period ? " " + t.period : ""}`].filter(Boolean).join(" · ");
+      return `<div role="option" id="${list.id}-${i}" aria-selected="${i === active}" data-i="${i}">
+        <span class="opt-title">${esc(e.title)}</span><span class="opt-sub">${esc(sub)}</span></div>`;
+    }).join("") : `<div class="no-results">No match. Try a country, a big city, or EST/PST.</div>`;
+    list.hidden = false;
+    input.setAttribute("aria-expanded", "true");
+    input.setAttribute("aria-activedescendant", results.length ? `${list.id}-${active}` : "");
+    const el = list.querySelector('[aria-selected="true"]');
+    if (el) el.scrollIntoView({ block: "nearest" });
+  };
+  const pick = i => {
+    const e = results[i]; if (!e) return;
+    input.value = e.title;
+    input.dataset.tz = e.tz;
+    input.dataset.place = e.place;
+    close();
+    onPick && onPick(e);
+  };
+  input.addEventListener("input", () => {
+    delete input.dataset.tz; delete input.dataset.place;
+    results = search(input.value); active = 0; render();
+  });
+  input.addEventListener("keydown", ev => {
+    if (list.hidden && ev.key === "ArrowDown" && input.value.trim()) { results = search(input.value); render(); return; }
+    if (list.hidden) return;
+    if (ev.key === "ArrowDown") { ev.preventDefault(); active = Math.min(active + 1, results.length - 1); render(); }
+    else if (ev.key === "ArrowUp") { ev.preventDefault(); active = Math.max(active - 1, 0); render(); }
+    else if (ev.key === "Enter") { if (results.length) { ev.preventDefault(); pick(active); } }
+    else if (ev.key === "Escape") { ev.preventDefault(); close(); }
+  });
+  list.addEventListener("mousedown", ev => {
+    const o = ev.target.closest('[role="option"]');
+    if (o) { ev.preventDefault(); pick(+o.dataset.i); }
+  });
+  input.addEventListener("blur", () => setTimeout(close, 100));
+  return { close };
+}
+
 /* ---------- icons ---------- */
 const SUN = '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="3"/><path d="M8 1.5v1.6M8 12.9v1.6M1.5 8h1.6M12.9 8h1.6M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M3.4 12.6l1.1-1.1M11.5 4.5l1.1-1.1"/></svg>';
 const MOON = '<svg viewBox="0 0 16 16"><path d="M13.2 10.1A5.6 5.6 0 0 1 5.9 2.8a5.6 5.6 0 1 0 7.3 7.3Z"/></svg>';
@@ -111,11 +228,13 @@ const $ = id => document.getElementById(id);
 const els = {
   hero: $("hero"), mainCity: $("mainCity"), mainChip: $("mainChip"),
   mainTime: $("mainTime"), mainAmpm: $("mainAmpm"), mainDate: $("mainDate"),
-  list: $("list"), empty: $("empty"),
+  list: $("list"), empty: $("empty"), news: $("news"), newsOk: $("newsOk"),
   settings: $("settings"), settingsBtn: $("settingsBtn"),
-  mainInput: $("mainInput"), mainError: $("mainError"),
+  mainInput: $("mainInput"), mainResults: $("mainResults"),
+  paletteName: $("paletteName"), fontName: $("fontName"),
   addForm: $("addForm"), addBtn: $("addBtn"), foot: $("foot"),
-  nameInput: $("nameInput"), tzInput: $("tzInput"), addError: $("addError"), cancelAdd: $("cancelAdd")
+  nameInput: $("nameInput"), tzInput: $("tzInput"), addResults: $("addResults"),
+  addError: $("addError"), cancelAdd: $("cancelAdd")
 };
 
 function save() { return store.set(state); }
@@ -124,19 +243,28 @@ function esc(s) {
   return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
+function zonePlace(z) { return z.place || placeLabel(z.tz); }
+
+function applyLook(night) {
+  const root = document.documentElement;
+  root.dataset.theme = state.theme === "auto" ? (night ? "dark" : "light") : state.theme;
+  root.dataset.palette = PALETTES[state.palette] ? state.palette : "blush";
+  root.dataset.font = FONTS[state.nameFont] ? state.nameFont : "cormorant";
+}
+
 function renderList() {
   els.empty.hidden = state.zones.length > 0;
   els.list.innerHTML = state.zones.map(z => `
     <article class="card" data-id="${esc(z.id)}" data-tz="${esc(z.tz)}">
       <div class="card-main">
-        <button type="button" class="name" title="Click to rename">${esc(z.name || cityOf(z.tz))}</button>
+        <button type="button" class="name" title="Click to rename">${esc(z.name || zonePlace(z).split(",")[0])}</button>
         <span class="meta"></span>
       </div>
       <div class="card-time">
         <div class="t"></div>
         <div class="diff"></div>
       </div>
-      <button type="button" class="remove" aria-label="Remove ${esc(z.name || cityOf(z.tz))}">&times;</button>
+      <button type="button" class="remove" aria-label="Remove ${esc(z.name || zonePlace(z))}">&times;</button>
     </article>`).join("");
   tick();
 }
@@ -145,23 +273,19 @@ function tick() {
   const now = new Date();
   const main = state.main;
   const mainNight = isNight(main, now);
+  applyLook(mainNight);
 
-  // theme
-  const theme = state.theme === "auto" ? (mainNight ? "dark" : "light") : state.theme;
-  document.documentElement.dataset.theme = theme;
-
-  // hero
   const ft = formatTime(main, now, state.hour12);
   els.mainTime.textContent = ft.time;
   els.mainAmpm.textContent = ft.period;
-  els.mainCity.textContent = cityOf(main);
+  els.mainCity.textContent = (state.mainPlace || placeLabel(main)).split(",")[0];
   els.mainDate.textContent = formatDate(main, now);
   els.hero.classList.toggle("night", mainNight);
   els.mainChip.innerHTML = (mainNight ? MOON : SUN) + (mainNight ? "Night" : "Day");
 
-  // cards
   for (const card of els.list.children) {
     const tz = card.dataset.tz;
+    const zone = state.zones.find(z => z.id === card.dataset.id);
     const night = isNight(tz, now);
     card.classList.toggle("night", night);
     const t = formatTime(tz, now, state.hour12);
@@ -171,19 +295,22 @@ function tick() {
       `<span class="${d.ahead ? "ahead" : ""}">${esc(d.text)}</span>` +
       (d.day ? `<span>&middot; ${d.day}</span>` : "") +
       `<span class="state" title="${night ? "Night" : "Day"} there">${night ? MOON : SUN}</span>`;
-    const abbr = shortZone(tz, now);
-    card.querySelector(".meta").textContent = cityOf(tz) + (abbr ? " · " + abbr : "");
+    const abbr = zoneName(tz, now, "short");
+    const place = zone ? zonePlace(zone) : placeLabel(tz);
+    card.querySelector(".meta").textContent = place + (abbr ? " · " + abbr : "");
   }
 }
 
 function syncControls() {
-  els.mainInput.value = state.main;
-  document.querySelectorAll(".seg").forEach(seg => {
-    const key = seg.dataset.key;
-    seg.querySelectorAll("button").forEach(b => {
+  if (document.activeElement !== els.mainInput) els.mainInput.value = state.mainPlace || placeLabel(state.main);
+  document.querySelectorAll("[data-key]").forEach(group => {
+    const key = group.dataset.key;
+    group.querySelectorAll("button").forEach(b => {
       b.setAttribute("aria-pressed", String(String(state[key]) === b.dataset.v));
     });
   });
+  els.paletteName.textContent = "· " + (PALETTES[state.palette] || "Blush");
+  els.fontName.textContent = "· " + (FONTS[state.nameFont] || "Cormorant");
 }
 
 /* ---------- interactions ---------- */
@@ -195,40 +322,49 @@ els.settingsBtn.addEventListener("click", () => {
   if (open) syncControls();
 });
 
-document.querySelectorAll(".seg").forEach(seg => {
-  seg.addEventListener("click", e => {
+document.querySelectorAll("[data-key]").forEach(group => {
+  group.addEventListener("click", e => {
     const b = e.target.closest("button");
     if (!b) return;
-    const key = seg.dataset.key;
+    const key = group.dataset.key;
     state[key] = key === "hour12" ? b.dataset.v === "true" : b.dataset.v;
-    syncControls(); tick(); save();
+    syncControls(); renderList(); save();
   });
 });
 
-els.mainInput.addEventListener("change", () => {
-  const v = els.mainInput.value.trim();
-  if (!ZONE_SET.has(v)) { els.mainError.hidden = false; return; }
-  els.mainError.hidden = true;
-  state.main = v; tick(); save();
+attachSearch(els.mainInput, els.mainResults, e => {
+  state.main = e.tz; state.mainPlace = e.place;
+  tick(); save();
 });
+els.mainInput.addEventListener("blur", () => setTimeout(() => {
+  if (!els.mainInput.dataset.tz) els.mainInput.value = state.mainPlace || placeLabel(state.main);
+}, 150));
 
 function openAdd(open) {
   els.addForm.hidden = !open;
   els.foot.hidden = open;
   els.addError.hidden = true;
-  if (open) { els.nameInput.value = ""; els.tzInput.value = ""; els.nameInput.focus(); }
+  if (open) {
+    els.nameInput.value = ""; els.tzInput.value = "";
+    delete els.tzInput.dataset.tz; delete els.tzInput.dataset.place;
+    els.nameInput.focus();
+  }
 }
 els.addBtn.addEventListener("click", () => openAdd(true));
 els.cancelAdd.addEventListener("click", () => openAdd(false));
+attachSearch(els.tzInput, els.addResults, () => { els.addError.hidden = true; });
 
 els.addForm.addEventListener("submit", e => {
   e.preventDefault();
-  const tz = els.tzInput.value.trim();
-  if (!ZONE_SET.has(tz)) { els.addError.hidden = false; els.tzInput.focus(); return; }
-  const name = els.nameInput.value.trim() || cityOf(tz);
-  state.zones = [...state.zones, { id: Date.now().toString(36), name, tz }];
+  let tz = els.tzInput.dataset.tz, place = els.tzInput.dataset.place;
+  if (!tz && els.tzInput.value.trim()) {           // typed but didn't pick: take the best match
+    const best = search(els.tzInput.value)[0];
+    if (best) { tz = best.tz; place = best.place; }
+  }
+  if (!tz || !validZone(tz)) { els.addError.hidden = false; els.tzInput.focus(); return; }
+  const name = els.nameInput.value.trim() || place.split(",")[0];
+  state.zones = [...state.zones, { id: Date.now().toString(36), name, tz, place }];
   save(); renderList(); openAdd(false);
-  els.list.scrollTop = els.list.scrollHeight;
 });
 
 els.list.addEventListener("click", e => {
@@ -254,7 +390,7 @@ els.list.addEventListener("click", e => {
     let done = false;
     const commit = keep => {
       if (done) return; done = true;
-      if (keep) { zone.name = input.value.trim() || cityOf(zone.tz); save(); }
+      if (keep) { zone.name = input.value.trim() || zonePlace(zone).split(",")[0]; save(); }
       renderList();
     };
     input.addEventListener("keydown", ev => {
@@ -265,23 +401,31 @@ els.list.addEventListener("click", e => {
   }
 });
 
+els.newsOk.addEventListener("click", () => {
+  els.news.hidden = true;
+  state.seenVersion = VERSION; save();
+});
+
 // keep in sync if changed from another open window
 if (hasChrome) {
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== "sync") return;
-    for (const k in changes) state[k] = changes[k].newValue;
+    for (const k in changes) if (k in DEFAULTS) state[k] = changes[k].newValue;
     renderList(); syncControls();
   });
 }
 
 /* ---------- start ---------- */
 (async function init() {
-  // datalist: value = IANA name, label = readable city
-  els.tzList = document.getElementById("tzList");
-  els.tzList.innerHTML = [...ZONE_SET].map(z => `<option value="${esc(z)}">${esc(cityOf(z))}</option>`).join("");
+  const raw = await store.raw();
+  const isNewInstall = Object.keys(raw).length === 0;
+  state = { ...DEFAULTS, ...raw };
+  if (!validZone(state.main)) state.main = "UTC";
+  state.zones = (state.zones || []).filter(z => z && validZone(z.tz));
 
-  state = await store.get();
-  if (!ZONE_SET.has(state.main)) state.main = "UTC";
+  if (isNewInstall) { state.seenVersion = VERSION; save(); }
+  else if (state.seenVersion !== VERSION && VERSION.startsWith("1.1")) els.news.hidden = false;
+
   syncControls();
   renderList();
   setInterval(tick, 1000);

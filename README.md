@@ -6,6 +6,8 @@ A Chrome extension for remote workers and VAs who work with clients in other cou
 - Add your clients' time zones and give each one a name ("Sarah", "NY office")
 - See how far ahead or behind each one is, and whether it's tomorrow or yesterday there
 - Cards switch to a night look when it's night in that place (6 PM – 6 AM)
+- Search by country, city, US state, or abbreviation (EST, PST, WAT, AEST), no time zone names needed
+- Five color palettes (Blush, Sage, Slate, Sand, Graphite) and five fonts for client names
 - Light, Dark, or Auto (goes dark when it's night where you are)
 - 12h or 24h clock
 
@@ -24,8 +26,11 @@ No account, no tracking, no network requests. Settings are stored with Chrome sy
 |---|---|
 | `manifest.json` | Extension config (Manifest V3, only the `storage` permission) |
 | `popup.html` / `popup.css` / `popup.js` | The popup UI and logic |
-| `fonts/` | Outfit and Cormorant Garamond (SIL Open Font License), bundled locally |
+| `data.js` | Place search data: every IANA time zone plus countries, capitals, major cities, states, and abbreviations |
+| `fonts/` | Outfit, Cormorant Garamond, Playfair Display, Fraunces, Dancing Script (SIL Open Font License), bundled locally |
 | `icons/` | Toolbar and store icons |
+
+See [CHANGELOG.md](CHANGELOG.md) for what changed in each version.
 
 ## License
 
