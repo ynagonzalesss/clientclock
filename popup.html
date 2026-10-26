@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-theme="light">
+<html lang="en" data-theme="light" data-palette="blush" data-font="cormorant">
 <head>
   <meta charset="utf-8">
   <title>ClientClock</title>
@@ -11,12 +11,21 @@
     <button id="settingsBtn" class="text-btn" aria-expanded="false">Settings</button>
   </header>
 
+  <aside class="news" id="news" hidden>
+    <div>
+      <strong>New in this update</strong>
+      <p>Search by country, city, or EST/PST. Pick a font and a color in Settings.</p>
+    </div>
+    <button type="button" class="text-btn" id="newsOk">Got it</button>
+  </aside>
+
   <section id="settings" class="panel" hidden>
-    <label class="field">
-      <span>Your time zone</span>
-      <input id="mainInput" list="tzList" autocomplete="off" spellcheck="false">
-    </label>
-    <p class="error" id="mainError" hidden>Pick a time zone from the list.</p>
+    <div class="field">
+      <span>Your location</span>
+      <input id="mainInput" placeholder="Country, city, or EST/PST" autocomplete="off" spellcheck="false"
+             role="combobox" aria-expanded="false" aria-autocomplete="list" aria-controls="mainResults">
+      <div class="results" id="mainResults" role="listbox" hidden></div>
+    </div>
     <div class="row">
       <span class="label">Clock</span>
       <div class="seg" data-key="hour12">
@@ -33,6 +42,26 @@
       </div>
     </div>
     <p class="hint">Auto turns dark when it's night where you are.</p>
+    <div class="stack">
+      <span class="label">Color <em id="paletteName"></em></span>
+      <div class="swatches" data-key="palette">
+        <button type="button" data-v="blush" aria-label="Blush" title="Blush"></button>
+        <button type="button" data-v="sage" aria-label="Sage" title="Sage"></button>
+        <button type="button" data-v="slate" aria-label="Slate" title="Slate"></button>
+        <button type="button" data-v="sand" aria-label="Sand" title="Sand"></button>
+        <button type="button" data-v="graphite" aria-label="Graphite" title="Graphite"></button>
+      </div>
+    </div>
+    <div class="stack">
+      <span class="label">Name font <em id="fontName"></em></span>
+      <div class="fonts" data-key="nameFont">
+        <button type="button" data-v="cormorant" aria-label="Cormorant" title="Cormorant">Aa</button>
+        <button type="button" data-v="playfair" aria-label="Playfair" title="Playfair">Aa</button>
+        <button type="button" data-v="fraunces" aria-label="Fraunces" title="Fraunces">Aa</button>
+        <button type="button" data-v="dancing" aria-label="Dancing Script" title="Dancing Script">Aa</button>
+        <button type="button" data-v="outfit" aria-label="Outfit" title="Outfit">Aa</button>
+      </div>
+    </div>
   </section>
 
   <section class="hero" id="hero">
@@ -53,11 +82,13 @@
       <span>Name</span>
       <input id="nameInput" placeholder="e.g. Sarah, Toronto office" maxlength="40" autocomplete="off">
     </label>
-    <label class="field">
-      <span>Time zone</span>
-      <input id="tzInput" list="tzList" placeholder="Search a city or region" autocomplete="off" spellcheck="false">
-    </label>
-    <p class="error" id="addError" hidden>Pick a time zone from the list.</p>
+    <div class="field">
+      <span>Location</span>
+      <input id="tzInput" placeholder="Country, city, or EST/PST" autocomplete="off" spellcheck="false"
+             role="combobox" aria-expanded="false" aria-autocomplete="list" aria-controls="addResults">
+      <div class="results" id="addResults" role="listbox" hidden></div>
+    </div>
+    <p class="error" id="addError" hidden>Pick a place from the list.</p>
     <div class="add-actions">
       <button type="button" class="text-btn" id="cancelAdd">Cancel</button>
       <button type="submit" class="pill"><span>Save</span><i class="pill-arrow" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M6 3.5 10.5 8 6 12.5"/></svg></i></button>
@@ -68,7 +99,7 @@
     <button type="button" class="pill" id="addBtn"><span>Add a time zone</span><i class="pill-arrow" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M6 3.5 10.5 8 6 12.5"/></svg></i></button>
   </footer>
 
-  <datalist id="tzList"></datalist>
+  <script src="data.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>
